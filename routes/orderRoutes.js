@@ -39,16 +39,19 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 3. DELETE ALL OLD CORRUPTED ORDERS (DELETE /api/orders/all/clear)
+// 3. DELETE ALL OLD CORRUPTED ORDERS (Supports Both GET & DELETE for Browser URL Trigger)
 // Note: Is route ko /:id se UPAR rakha gaya hai taaki Express "all/clear" ko ID na samjhe.
-router.delete('/all/clear', async (req, res) => {
+const clearAllOrdersHandler = async (req, res) => {
   try {
     await Order.deleteMany({});
-    return res.status(200).json({ message: 'Sare purane orders DB se delete ho gaye!' });
+    return res.status(200).json({ message: 'Sare purane orders DB se successfully delete ho gaye!' });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
-});
+};
+
+router.get('/all/clear', clearAllOrdersHandler);
+router.delete('/all/clear', clearAllOrdersHandler);
 
 // 4. User Ke Saare Orders Fetch Karne Ki API (GET /api/orders/user/:userId)
 router.get('/user/:userId', async (req, res) => {
