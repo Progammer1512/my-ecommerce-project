@@ -13,12 +13,12 @@ router.post('/', async (req, res) => {
     }
 
     const order = new Order({
-      user: userId,
+      user: userId || 'GuestUser',
       userEmail: userEmail || 'guest@techstore.com',
       orderItems,
       shippingAddress,
       totalPrice,
-      paymentMethod: paymentMethod || 'COD',
+      paymentMethod: paymentMethod || 'Cash on Delivery (COD)',
       status: 'Processing'
     });
 
@@ -40,7 +40,6 @@ router.get('/', async (req, res) => {
 });
 
 // 3. DELETE ALL OLD CORRUPTED ORDERS (Supports Both GET & DELETE for Browser URL Trigger)
-// Note: Is route ko /:id se UPAR rakha gaya hai taaki Express "all/clear" ko ID na samjhe.
 const clearAllOrdersHandler = async (req, res) => {
   try {
     await Order.deleteMany({});
@@ -53,10 +52,15 @@ const clearAllOrdersHandler = async (req, res) => {
 router.get('/all/clear', clearAllOrdersHandler);
 router.delete('/all/clear', clearAllOrdersHandler);
 
-// 4. User Ke Saare Orders Fetch Karne Ki API (GET /api/orders/user/:userId)
-router.get('/user/:userId', async (req, res) => {
+// 4. User Ke Saare Orders Fetch Karne Ki API (GET /api/orders/user/:userEmail)
+router.get('/user/:userEmail', async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.params.userId }).sort({ createdAt: -1 });
+    const orders = await Order.find({
+      $or: [
+        { userEmail: req.params.userEmail },
+        { user: req.params.userEmail }
+      ]
+    }).sort({ createdAt: -1 });
     return res.json(orders);
   } catch (error) {
     return res.status(500).json({ message: error.message });
