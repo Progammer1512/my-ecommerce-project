@@ -174,7 +174,6 @@ app.post('/api/coupons', async (req, res) => {
   }
 });
 
-// COUPON USAGE INCREMENT ENDPOINT
 app.post('/api/coupons/use', async (req, res) => {
   try {
     const { code } = req.body;
