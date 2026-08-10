@@ -124,6 +124,24 @@ app.get('/api/coupons', async (req, res) => {
   }
 });
 
+// 🚀 4.1 COUPON USAGE INCREMENT ENDPOINT (Fixes 404 Error on Order Place)
+app.post('/api/coupons/use', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ message: 'Coupon code required' });
+
+    const coupon = await Coupon.findOne({ code: code.toUpperCase().trim() });
+    if (coupon) {
+      coupon.usedCount = (coupon.usedCount || 0) + 1;
+      await coupon.save();
+      return res.status(200).json({ message: 'Coupon usage incremented', coupon });
+    }
+    return res.status(404).json({ message: 'Coupon not found' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Coupon update error: ' + error.message });
+  }
+});
+
 // 🚀 5. DIRECT MASTER CLEAR ROUTE (Delete All Corrupted/Old Orders from MongoDB Collection)
 app.get('/api/orders/all/clear', async (req, res) => {
   try {
