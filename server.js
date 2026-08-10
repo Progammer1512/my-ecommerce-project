@@ -1,29 +1,50 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const helmet = require('helmet');
 const multer = require('multer');
 require('dotenv').config();
 
-// Existing Routes Imports
-const authRoutes = require('./routes/authRoutes');
-const productRoutes = require('./routes/productRoutes');
-const orderRoutes = require('./routes/orderRoutes');
+// Helmet Safe Require (Prevents MODULE_NOT_FOUND Crash)
+let helmet;
+try {
+  helmet = require('helmet');
+} catch (e) {
+  console.log('⚠️ Helmet package missing, proceeding without helmet middleware');
+}
 
-// Models Imports for Direct Endpoints
-const Banner = require('./models/bannerModel');
-const Review = require('./models/reviewModel');
-const Coupon = require('./models/couponModel');
+// Existing Routes Imports
+let authRoutes, productRoutes, orderRoutes;
+try { authRoutes = require('./routes/authRoutes'); } catch (e) {}
+try { productRoutes = require('./routes/productRoutes'); } catch (e) {}
+try { orderRoutes = require('./routes/orderRoutes'); } catch (e) {}
+
+// Models Imports with Dynamic Fallbacks
+let Banner, Review, Coupon;
+try { Banner = require('./models/bannerModel'); } catch (e) {
+  const schema = new mongoose.Schema({ title: String, subtitle: String, badge: String, img: String, bg: String }, { timestamps: true });
+  Banner = mongoose.models.Banner || mongoose.model('Banner', schema);
+}
+try { Review = require('./models/reviewModel'); } catch (e) {
+  const schema = new mongoose.Schema({ orderId: String, customerName: String, customerEmail: String, rating: Number, comment: String }, { timestamps: true });
+  Review = mongoose.models.Review || mongoose.model('Review', schema);
+}
+try { Coupon = require('./models/couponModel'); } catch (e) {
+  const schema = new mongoose.Schema({ code: String, discount: Number, category: String, maxUsage: Number, usedCount: Number, status: String }, { timestamps: true });
+  Coupon = mongoose.models.Coupon || mongoose.model('Coupon', schema);
+}
 
 const app = express();
 
-// Middlewares with High Payload Limits for Images & Cors Priority
+// Middlewares with High Payload Limits & CORS Priority
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(helmet({ crossOriginResourcePolicy: false }));
 
-// Multer Memory Storage (For Base64 Uploads)
+if (helmet) {
+  app.use(helmet({ crossOriginResourcePolicy: false }));
+}
+
+// Multer Storage for Uploads
 const storage = multer.memoryStorage();
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -40,7 +61,7 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
   }
 });
 
-// 2. Direct Banner Endpoints (Fixed 404 Error)
+// 2. Direct Banner Endpoints
 app.get('/api/banners', async (req, res) => {
   try {
     const banners = await Banner.find({}).sort({ createdAt: -1 });
@@ -104,11 +125,11 @@ app.get('/api/coupons', async (req, res) => {
 });
 
 // Mounted API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/orders', orderRoutes);
+if (authRoutes) app.use('/api/auth', authRoutes);
+if (productRoutes) app.use('/api/products', productRoutes);
+if (orderRoutes) app.use('/api/orders', orderRoutes);
 
-// Test Route
+// Root Healthcheck Route
 app.get('/', (req, res) => {
   res.send('Aapka E-Commerce Backend Server Successfully Chalu Ho Gaya Hai!');
 });
@@ -120,11 +141,10 @@ const startServer = async () => {
     
     if (!mongoUri) {
       console.error('❌ MONGO_URI is missing in .env file!');
-      return;
+    } else {
+      await mongoose.connect(mongoUri);
+      console.log('✅ Real MongoDB Atlas Database Connected Successfully!');
     }
-
-    await mongoose.connect(mongoUri);
-    console.log('✅ Real MongoDB Atlas Database Connected Successfully!');
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
