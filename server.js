@@ -114,7 +114,6 @@ app.get('/api/reviews', async (req, res) => {
   }
 });
 
-// 🚀 POST REVIEW ENDPOINT (Fixes 404 Review Submit Error)
 app.post('/api/reviews', async (req, res) => {
   try {
     const { orderId, customerName, customerEmail, rating, comment, items } = req.body;
@@ -145,7 +144,37 @@ app.get('/api/coupons', async (req, res) => {
   }
 });
 
-// 🚀 4.1 COUPON USAGE INCREMENT ENDPOINT
+// 🚀 CREATE NEW COUPON ENDPOINT (Fixes Admin 404 Coupon Create Error)
+app.post('/api/coupons', async (req, res) => {
+  try {
+    const { code, discount, category, maxUsage } = req.body;
+    if (!code || discount === undefined) {
+      return res.status(400).json({ message: 'Coupon code and discount are required' });
+    }
+
+    const existingCoupon = await Coupon.findOne({ code: code.toUpperCase().trim() });
+    if (existingCoupon) {
+      return res.status(400).json({ message: 'Coupon code already exists!' });
+    }
+
+    const newCoupon = new Coupon({
+      code: code.toUpperCase().trim(),
+      discount: Number(discount) || 10,
+      category: category || 'All',
+      maxUsage: Number(maxUsage) || 50,
+      usedCount: 0,
+      status: 'Active'
+    });
+
+    await newCoupon.save();
+    const allCoupons = await Coupon.find({}).sort({ createdAt: -1 });
+    return res.status(201).json({ message: 'Coupon created successfully!', coupons: allCoupons });
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to create coupon: ' + error.message });
+  }
+});
+
+// COUPON USAGE INCREMENT ENDPOINT
 app.post('/api/coupons/use', async (req, res) => {
   try {
     const { code } = req.body;
@@ -163,7 +192,7 @@ app.post('/api/coupons/use', async (req, res) => {
   }
 });
 
-// 🚀 5. DIRECT MASTER CLEAR ROUTE
+// 5. DIRECT MASTER CLEAR ROUTE
 app.get('/api/orders/all/clear', async (req, res) => {
   try {
     if (mongoose.connection.db) {
