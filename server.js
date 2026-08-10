@@ -25,7 +25,7 @@ try { Banner = require('./models/bannerModel'); } catch (e) {
   Banner = mongoose.models.Banner || mongoose.model('Banner', schema);
 }
 try { Review = require('./models/reviewModel'); } catch (e) {
-  const schema = new mongoose.Schema({ orderId: String, customerName: String, customerEmail: String, rating: Number, comment: String }, { timestamps: true });
+  const schema = new mongoose.Schema({ orderId: String, customerName: String, customerEmail: String, rating: Number, comment: String, items: Array }, { timestamps: true });
   Review = mongoose.models.Review || mongoose.model('Review', schema);
 }
 try { Coupon = require('./models/couponModel'); } catch (e) {
@@ -114,6 +114,27 @@ app.get('/api/reviews', async (req, res) => {
   }
 });
 
+// 🚀 POST REVIEW ENDPOINT (Fixes 404 Review Submit Error)
+app.post('/api/reviews', async (req, res) => {
+  try {
+    const { orderId, customerName, customerEmail, rating, comment, items } = req.body;
+    
+    const review = new Review({
+      orderId,
+      customerName: customerName || 'Verified Buyer',
+      customerEmail: customerEmail || 'guest@techstore.com',
+      rating: Number(rating) || 5,
+      comment,
+      items: items || []
+    });
+
+    const savedReview = await review.save();
+    return res.status(201).json({ message: 'Review published successfully!', review: savedReview });
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to save review: ' + error.message });
+  }
+});
+
 // 4. Direct Coupons Endpoints
 app.get('/api/coupons', async (req, res) => {
   try {
@@ -124,7 +145,7 @@ app.get('/api/coupons', async (req, res) => {
   }
 });
 
-// 🚀 4.1 COUPON USAGE INCREMENT ENDPOINT (Fixes 404 Error on Order Place)
+// 🚀 4.1 COUPON USAGE INCREMENT ENDPOINT
 app.post('/api/coupons/use', async (req, res) => {
   try {
     const { code } = req.body;
@@ -142,7 +163,7 @@ app.post('/api/coupons/use', async (req, res) => {
   }
 });
 
-// 🚀 5. DIRECT MASTER CLEAR ROUTE (Delete All Corrupted/Old Orders from MongoDB Collection)
+// 🚀 5. DIRECT MASTER CLEAR ROUTE
 app.get('/api/orders/all/clear', async (req, res) => {
   try {
     if (mongoose.connection.db) {
