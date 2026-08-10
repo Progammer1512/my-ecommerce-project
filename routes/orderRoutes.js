@@ -14,7 +14,7 @@ router.post('/', async (req, res) => {
 
     const order = new Order({
       user: userId,
-      userEmail,
+      userEmail: userEmail || 'guest@techstore.com',
       orderItems,
       shippingAddress,
       totalPrice,
@@ -39,7 +39,18 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 3. User Ke Saare Orders Fetch Karne Ki API (GET /api/orders/user/:userId)
+// 3. DELETE ALL OLD CORRUPTED ORDERS (DELETE /api/orders/all/clear)
+// Note: Is route ko /:id se UPAR rakha gaya hai taaki Express "all/clear" ko ID na samjhe.
+router.delete('/all/clear', async (req, res) => {
+  try {
+    await Order.deleteMany({});
+    return res.status(200).json({ message: 'Sare purane orders DB se delete ho gaye!' });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// 4. User Ke Saare Orders Fetch Karne Ki API (GET /api/orders/user/:userId)
 router.get('/user/:userId', async (req, res) => {
   try {
     const orders = await Order.find({ user: req.params.userId }).sort({ createdAt: -1 });
@@ -49,7 +60,32 @@ router.get('/user/:userId', async (req, res) => {
   }
 });
 
-// 4. Single Order Detail Fetch (GET /api/orders/:id)
+// 5. CUSTOMER RETURN / REPLACEMENT REQUEST (PUT /api/orders/:id/return)
+router.put('/:id/return', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id || id === 'undefined' || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid Order ID format' });
+    }
+
+    const { returnType, reason, comments } = req.body;
+    const order = await Order.findById(id);
+
+    if (order) {
+      order.status = `Return Requested (${returnType || 'Refund'})`;
+      order.returnRequest = { returnType, reason, comments };
+      const updatedOrder = await order.save();
+      return res.json({ message: 'Return request submitted successfully!', order: updatedOrder });
+    } else {
+      return res.status(404).json({ message: 'Order nahi mila' });
+    }
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// 6. Single Order Detail Fetch (GET /api/orders/:id)
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -69,12 +105,11 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// 5. UPDATE ORDER STATUS FOR ADMIN (PUT /api/orders/:id) - FIXED CAST ERROR
+// 7. UPDATE ORDER STATUS FOR ADMIN (PUT /api/orders/:id)
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Strict Object ID and 'undefined' validation
     if (!id || id === 'undefined' || id === 'null' || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: 'Galat ya missing Order ID. Kripya page refresh karein.' });
     }
