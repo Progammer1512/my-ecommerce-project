@@ -124,6 +124,19 @@ app.get('/api/coupons', async (req, res) => {
   }
 });
 
+// 🚀 5. DIRECT MASTER CLEAR ROUTE (Delete All Corrupted/Old Orders from MongoDB Collection)
+app.get('/api/orders/all/clear', async (req, res) => {
+  try {
+    if (mongoose.connection.db) {
+      await mongoose.connection.db.collection('orders').deleteMany({});
+      return res.status(200).send('<h1>✅ Sare Purane Orders MongoDB Database Se Hamesha Ke Liye Saaf Ho Gaye!</h1>');
+    }
+    return res.status(500).send('Database connection error');
+  } catch (err) {
+    return res.status(500).send('Error clearing orders: ' + err.message);
+  }
+});
+
 // Mounted API Routes
 if (authRoutes) app.use('/api/auth', authRoutes);
 if (productRoutes) app.use('/api/products', productRoutes);
