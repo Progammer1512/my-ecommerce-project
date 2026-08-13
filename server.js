@@ -19,7 +19,7 @@ try { productRoutes = require('./routes/productRoutes'); } catch (e) {}
 try { orderRoutes = require('./routes/orderRoutes'); } catch (e) {}
 
 // Models Imports with Dynamic Fallbacks
-let Banner, Review, Coupon, User;
+let Banner, Review, Coupon, User, AbandonedCart, WishlistRecord;
 try { Banner = require('./models/bannerModel'); } catch (e) {
   const schema = new mongoose.Schema({ title: String, subtitle: String, badge: String, img: String, bg: String }, { timestamps: true });
   Banner = mongoose.models.Banner || mongoose.model('Banner', schema);
@@ -36,14 +36,24 @@ try { Coupon = require('./models/couponModel'); } catch (e) {
     maxUsage: Number, 
     usedCount: { type: Number, default: 0 }, 
     status: String,
-    targetUserEmail: { type: String, default: '' } // 🟢 Targeted Discount Field
+    targetUserEmail: { type: String, default: '' } 
   }, { timestamps: true });
   Coupon = mongoose.models.Coupon || mongoose.model('Coupon', schema);
 }
 
-// DYNAMIC USER MODEL FALLBACK WITH CART & WISHLIST TRACKING
-try { User = require('./models/userModel'); } catch (e) {
-  try { User = require('./models/User'); } catch (err) {
+// DYNAMIC USER & SEPARATE TRACKING MODELS IMPORTS WITH FALLBACKS
+try {
+  const userModule = require('./models/User');
+  User = userModule.User;
+  AbandonedCart = userModule.AbandonedCart;
+  WishlistRecord = userModule.WishlistRecord;
+} catch (e) {
+  try {
+    const userModule = require('./models/userModel');
+    User = userModule.User;
+    AbandonedCart = userModule.AbandonedCart;
+    WishlistRecord = userModule.WishlistRecord;
+  } catch (err) {
     const userSchema = new mongoose.Schema({
       name: String,
       email: { type: String, unique: true },
@@ -53,10 +63,27 @@ try { User = require('./models/userModel'); } catch (e) {
       pincode: String,
       googleId: String,
       avatar: String,
-      cart: { type: Array, default: [] },      // 🟢 Cart Tracking Array
-      wishlist: { type: Array, default: [] }   // 🟢 Wishlist Tracking Array
+      isVerified: { type: Boolean, default: true },
+      isAdmin: { type: Boolean, default: false }
     }, { timestamps: true });
+
+    const abandonedSchema = new mongoose.Schema({
+      userEmail: { type: String, lowercase: true, trim: true },
+      userName: String,
+      mobile: String,
+      cartItems: Array
+    }, { timestamps: true });
+
+    const wishlistSchema = new mongoose.Schema({
+      userEmail: { type: String, lowercase: true, trim: true },
+      userName: String,
+      mobile: String,
+      wishlistItems: Array
+    }, { timestamps: true });
+
     User = mongoose.models.User || mongoose.model('User', userSchema);
+    AbandonedCart = mongoose.models.AbandonedCart || mongoose.model('AbandonedCart', abandonedSchema);
+    WishlistRecord = mongoose.models.WishlistRecord || mongoose.model('WishlistRecord', wishlistSchema);
   }
 }
 
@@ -88,29 +115,47 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
   }
 });
 
-// 🟢 2. DIRECT PROFILE UPDATE & DELETE ENDPOINTS
+// 2. DIRECT PROFILE UPDATE & DELETE ENDPOINTS
 app.put('/api/auth/profile', async (req, res) => {
   try {
-    const { email, name, mobile, address, pincode } = req.body;
+    const { email, name, mobile, address, pincode, cart, wishlist } = req.body;
     if (!email) {
       return res.status(400).json({ message: 'Email ID is required to update profile' });
     }
 
+    const cleanEmail = email.toLowerCase().trim();
+
     let updatedUser = await User.findOneAndUpdate(
-      { email: email.toLowerCase().trim() },
+      { email: cleanEmail },
       { $set: { name, mobile, address, pincode } },
       { new: true, runValidators: false }
     );
 
     if (!updatedUser) {
       updatedUser = new User({
-        email: email.toLowerCase().trim(),
+        email: cleanEmail,
         name,
         mobile,
         address,
         pincode
       });
       await updatedUser.save();
+    }
+
+    if (cart !== undefined && Array.isArray(cart)) {
+      await AbandonedCart.findOneAndUpdate(
+        { userEmail: cleanEmail },
+        { $set: { userName: updatedUser.name, mobile: updatedUser.mobile, cartItems: cart } },
+        { upsert: true, new: true }
+      );
+    }
+
+    if (wishlist !== undefined && Array.isArray(wishlist)) {
+      await WishlistRecord.findOneAndUpdate(
+        { userEmail: cleanEmail },
+        { $set: { userName: updatedUser.name, mobile: updatedUser.mobile, wishlistItems: wishlist } },
+        { upsert: true, new: true }
+      );
     }
 
     return res.status(200).json({
@@ -136,7 +181,11 @@ app.delete('/api/auth/profile', async (req, res) => {
       return res.status(400).json({ message: 'Email ID is required to delete account' });
     }
 
-    await User.findOneAndDelete({ email: email.toLowerCase().trim() });
+    const cleanEmail = email.toLowerCase().trim();
+    await User.findOneAndDelete({ email: cleanEmail });
+    await AbandonedCart.findOneAndDelete({ userEmail: cleanEmail });
+    await WishlistRecord.findOneAndDelete({ userEmail: cleanEmail });
+
     return res.status(200).json({ message: 'Account permanently deleted from database.' });
   } catch (error) {
     console.error("Account Delete Error:", error);
@@ -144,10 +193,22 @@ app.delete('/api/auth/profile', async (req, res) => {
   }
 });
 
-// 🟢 3. FETCH ALL CUSTOMERS LIST FOR ADMIN CUSTOMER INTELLIGENCE TAB
+// 3. FETCH ALL CUSTOMERS LIST FOR ADMIN CUSTOMER INTELLIGENCE TAB
 app.get('/api/auth/customers', async (req, res) => {
   try {
-    const customers = await User.find({}, 'name email mobile address pincode cart wishlist createdAt').sort({ createdAt: -1 });
+    const users = await User.find({}, 'name email mobile address pincode createdAt').sort({ createdAt: -1 }).lean();
+    
+    const customers = await Promise.all(users.map(async (u) => {
+      const cartRecord = await AbandonedCart.findOne({ userEmail: u.email }).lean();
+      const wishlistRecord = await WishlistRecord.findOne({ userEmail: u.email }).lean();
+
+      return {
+        ...u,
+        cart: cartRecord ? cartRecord.cartItems : [],
+        wishlist: wishlistRecord ? wishlistRecord.wishlistItems : []
+      };
+    }));
+
     return res.status(200).json(customers);
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch customers: ' + error.message });
@@ -227,13 +288,12 @@ app.post('/api/reviews', async (req, res) => {
   }
 });
 
-// 🟢 6. DIRECT COUPONS ENDPOINTS WITH TARGETED CUSTOMER EMAIL FILTERING
+// 6. Direct Coupons Endpoints
 app.get('/api/coupons', async (req, res) => {
   try {
     const { email } = req.query;
     let query = {};
 
-    // If customer email is passed, show Global Coupons + Coupons specifically targeted to this customer
     if (email) {
       const cleanEmail = email.toLowerCase().trim();
       query = {
@@ -271,7 +331,7 @@ app.post('/api/coupons', async (req, res) => {
       maxUsage: Number(maxUsage) || 50,
       usedCount: 0,
       status: 'Active',
-      targetUserEmail: targetUserEmail ? targetUserEmail.toLowerCase().trim() : '' // 🎯 Target Specific Email
+      targetUserEmail: targetUserEmail ? targetUserEmail.toLowerCase().trim() : ''
     });
 
     await newCoupon.save();
