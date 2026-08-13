@@ -9,12 +9,12 @@ router.post('/google', async (req, res) => {
   const { name, email, googleId, avatar } = req.body;
 
   try {
-    let user = await User.findOne({ email });
+    let user = await User.findOne({ email: email ? email.toLowerCase().trim() : '' });
 
     if (!user) {
       user = new User({
         name,
-        email,
+        email: email ? email.toLowerCase().trim() : '',
         googleId,
         avatar,
         password: 'google_authenticated_user',
@@ -37,7 +37,9 @@ router.post('/signup', async (req, res) => {
   try {
     const { name, email, password, mobile, address, pincode } = req.body;
 
-    let user = await User.findOne({ email });
+    const cleanEmail = email ? email.toLowerCase().trim() : '';
+
+    let user = await User.findOne({ email: cleanEmail });
     if (user) {
       return res.status(400).json({ message: 'User already exists with this email. Please Login.' });
     }
@@ -47,11 +49,11 @@ router.post('/signup', async (req, res) => {
 
     user = new User({
       name,
-      email,
+      email: cleanEmail,
       password: hashedPassword,
-      mobile,
-      address,
-      pincode,
+      mobile: mobile || '',
+      address: address || '',
+      pincode: pincode || '',
       isVerified: true // Direct verified maan liya hai taaki OTP ki zarurat na pade
     });
     
@@ -59,7 +61,7 @@ router.post('/signup', async (req, res) => {
 
     const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET || 'secret_key', { expiresIn: '30d' });
 
-    console.log(`✅ User Registered Successfully: ${email}`);
+    console.log(`✅ User Registered Successfully: ${cleanEmail}`);
     res.status(200).json({ 
       message: 'Registration successful!',
       token,
@@ -75,7 +77,7 @@ router.post('/signup', async (req, res) => {
 router.post('/verify-otp', async (req, res) => {
   try {
     const { email } = req.body;
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email ? email.toLowerCase().trim() : '' });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -89,8 +91,9 @@ router.post('/verify-otp', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    const cleanEmail = email ? email.toLowerCase().trim() : '';
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: cleanEmail });
     if (!user) {
       return res.status(404).json({ message: 'User not found. Please Sign Up first.' });
     }
@@ -102,7 +105,7 @@ router.post('/login', async (req, res) => {
 
     const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET || 'secret_key', { expiresIn: '30d' });
 
-    console.log(`🔓 User Logged In: ${email}`);
+    console.log(`🔓 User Logged In: ${cleanEmail}`);
     res.status(200).json({
       message: 'Login successful!',
       token,
@@ -111,6 +114,83 @@ router.post('/login', async (req, res) => {
   } catch (error) {
     console.error('Login Error:', error);
     res.status(500).json({ message: 'Login failed', error: error.message });
+  }
+});
+
+// 🟢 5. UPDATE USER PROFILE ROUTE (PUT /api/auth/profile)
+router.put('/profile', async (req, res) => {
+  try {
+    const { email, name, mobile, address, pincode } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email ID is required to update profile' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    let user = await User.findOneAndUpdate(
+      { email: cleanEmail },
+      { 
+        $set: { 
+          name: name || '', 
+          mobile: mobile || '', 
+          address: address || '', 
+          pincode: pincode || '' 
+        } 
+      },
+      { new: true, runValidators: false }
+    );
+
+    if (!user) {
+      // If user profile record not created via signup, upsert it
+      user = new User({
+        email: cleanEmail,
+        name: name || 'Verified Customer',
+        password: 'google_authenticated_user',
+        mobile: mobile || '',
+        address: address || '',
+        pincode: pincode || '',
+        isVerified: true
+      });
+      await user.save();
+    }
+
+    console.log(`✏️ Profile Updated in MongoDB for: ${cleanEmail}`);
+
+    res.status(200).json({
+      message: 'Profile updated successfully in MongoDB!',
+      user: {
+        name: user.name,
+        email: user.email,
+        mobile: user.mobile,
+        address: user.address,
+        pincode: user.pincode
+      }
+    });
+  } catch (error) {
+    console.error('Update Profile Error:', error);
+    res.status(500).json({ message: 'Failed to update profile in database', error: error.message });
+  }
+});
+
+// 🟢 6. INSTANT DELETE USER ACCOUNT ROUTE (DELETE /api/auth/profile)
+router.delete('/profile', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email ID is required to delete account' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    await User.findOneAndDelete({ email: cleanEmail });
+
+    console.log(`🗑️ Account Permanently Deleted from MongoDB: ${cleanEmail}`);
+
+    res.status(200).json({ message: 'Account permanently deleted from database.' });
+  } catch (error) {
+    console.error('Delete Account Error:', error);
+    res.status(500).json({ message: 'Failed to delete account', error: error.message });
   }
 });
 
