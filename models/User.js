@@ -10,7 +10,11 @@ const userSchema = new mongoose.Schema({
   googleId: { type: String, default: '' },
   avatar: { type: String, default: '' },
   isVerified: { type: Boolean, default: true },
-  isAdmin: { type: Boolean, default: false }
+  isAdmin: { type: Boolean, default: false },
+  
+  // 🟢 NEW TRACKING FIELDS FOR ABANDONED CART & WISHLIST RECOVERY
+  cart: { type: Array, default: [] },
+  wishlist: { type: Array, default: [] }
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);
