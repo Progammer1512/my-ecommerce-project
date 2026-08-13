@@ -19,7 +19,7 @@ try { productRoutes = require('./routes/productRoutes'); } catch (e) {}
 try { orderRoutes = require('./routes/orderRoutes'); } catch (e) {}
 
 // Models Imports with Dynamic Fallbacks
-let Banner, Review, Coupon;
+let Banner, Review, Coupon, User;
 try { Banner = require('./models/bannerModel'); } catch (e) {
   const schema = new mongoose.Schema({ title: String, subtitle: String, badge: String, img: String, bg: String }, { timestamps: true });
   Banner = mongoose.models.Banner || mongoose.model('Banner', schema);
@@ -31,6 +31,23 @@ try { Review = require('./models/reviewModel'); } catch (e) {
 try { Coupon = require('./models/couponModel'); } catch (e) {
   const schema = new mongoose.Schema({ code: String, discount: Number, category: String, maxUsage: Number, usedCount: Number, status: String }, { timestamps: true });
   Coupon = mongoose.models.Coupon || mongoose.model('Coupon', schema);
+}
+
+// 🟢 DYNAMIC USER MODEL FALLBACK
+try { User = require('./models/userModel'); } catch (e) {
+  try { User = require('./models/User'); } catch (err) {
+    const userSchema = new mongoose.Schema({
+      name: String,
+      email: { type: String, unique: true },
+      password: String,
+      mobile: String,
+      address: String,
+      pincode: String,
+      googleId: String,
+      avatar: String
+    }, { timestamps: true });
+    User = mongoose.models.User || mongoose.model('User', userSchema);
+  }
 }
 
 const app = express();
@@ -61,7 +78,64 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
   }
 });
 
-// 2. Direct Banner Endpoints
+// 🟢 2. DIRECT PROFILE UPDATE & DELETE ENDPOINTS (FIXES MONGODB PROFILE UPDATE/DELETE ERROR)
+app.put('/api/auth/profile', async (req, res) => {
+  try {
+    const { email, name, mobile, address, pincode } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: 'Email ID is required to update profile' });
+    }
+
+    let updatedUser = await User.findOneAndUpdate(
+      { email: email.toLowerCase().trim() },
+      { $set: { name, mobile, address, pincode } },
+      { new: true, runValidators: false }
+    );
+
+    if (!updatedUser) {
+      // If user profile record not created via traditional signup, create/upsert it
+      updatedUser = new User({
+        email: email.toLowerCase().trim(),
+        name,
+        mobile,
+        address,
+        pincode
+      });
+      await updatedUser.save();
+    }
+
+    return res.status(200).json({
+      message: 'Profile updated successfully in MongoDB!',
+      user: {
+        name: updatedUser.name,
+        email: updatedUser.email,
+        mobile: updatedUser.mobile,
+        address: updatedUser.address,
+        pincode: updatedUser.pincode
+      }
+    });
+  } catch (error) {
+    console.error("Profile Update Error:", error);
+    return res.status(500).json({ message: 'Failed to update profile in database: ' + error.message });
+  }
+});
+
+app.delete('/api/auth/profile', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: 'Email ID is required to delete account' });
+    }
+
+    await User.findOneAndDelete({ email: email.toLowerCase().trim() });
+    return res.status(200).json({ message: 'Account permanently deleted from database.' });
+  } catch (error) {
+    console.error("Account Delete Error:", error);
+    return res.status(500).json({ message: 'Failed to delete account: ' + error.message });
+  }
+});
+
+// 3. Direct Banner Endpoints
 app.get('/api/banners', async (req, res) => {
   try {
     const banners = await Banner.find({}).sort({ createdAt: -1 });
@@ -104,7 +178,7 @@ app.delete('/api/banners/:id', async (req, res) => {
   }
 });
 
-// 3. Direct Reviews Endpoints
+// 4. Direct Reviews Endpoints
 app.get('/api/reviews', async (req, res) => {
   try {
     const reviews = await Review.find({}).sort({ createdAt: -1 });
@@ -134,7 +208,7 @@ app.post('/api/reviews', async (req, res) => {
   }
 });
 
-// 4. Direct Coupons Endpoints
+// 5. Direct Coupons Endpoints
 app.get('/api/coupons', async (req, res) => {
   try {
     const coupons = await Coupon.find({}).sort({ createdAt: -1 });
@@ -144,7 +218,6 @@ app.get('/api/coupons', async (req, res) => {
   }
 });
 
-// 🚀 CREATE NEW COUPON ENDPOINT (Fixes Admin 404 Coupon Create Error)
 app.post('/api/coupons', async (req, res) => {
   try {
     const { code, discount, category, maxUsage } = req.body;
@@ -191,7 +264,7 @@ app.post('/api/coupons/use', async (req, res) => {
   }
 });
 
-// 5. DIRECT MASTER CLEAR ROUTE
+// 6. DIRECT MASTER CLEAR ROUTE
 app.get('/api/orders/all/clear', async (req, res) => {
   try {
     if (mongoose.connection.db) {
