@@ -19,7 +19,7 @@ try { productRoutes = require('./routes/productRoutes'); } catch (e) {}
 try { orderRoutes = require('./routes/orderRoutes'); } catch (e) {}
 
 // Models Imports with Dynamic Fallbacks
-let Banner, Review, Coupon, User, AbandonedCart, WishlistRecord;
+let Banner, Review, Coupon, User, AdminUser, AbandonedCart, WishlistRecord;
 try { Banner = require('./models/bannerModel'); } catch (e) {
   const schema = new mongoose.Schema({ title: String, subtitle: String, badge: String, img: String, bg: String }, { timestamps: true });
   Banner = mongoose.models.Banner || mongoose.model('Banner', schema);
@@ -41,16 +41,18 @@ try { Coupon = require('./models/couponModel'); } catch (e) {
   Coupon = mongoose.models.Coupon || mongoose.model('Coupon', schema);
 }
 
-// DYNAMIC USER & SEPARATE TRACKING MODELS IMPORTS WITH FALLBACKS
+// 🟢 DYNAMIC USER, ADMIN-USER & SEPARATE TRACKING MODELS IMPORTS WITH FALLBACKS
 try {
   const userModule = require('./models/User');
   User = userModule.User;
+  AdminUser = userModule.AdminUser;
   AbandonedCart = userModule.AbandonedCart;
   WishlistRecord = userModule.WishlistRecord;
 } catch (e) {
   try {
     const userModule = require('./models/userModel');
     User = userModule.User;
+    AdminUser = userModule.AdminUser;
     AbandonedCart = userModule.AbandonedCart;
     WishlistRecord = userModule.WishlistRecord;
   } catch (err) {
@@ -63,8 +65,15 @@ try {
       pincode: String,
       googleId: String,
       avatar: String,
-      isVerified: { type: Boolean, default: true },
-      isAdmin: { type: Boolean, default: false }
+      isVerified: { type: Boolean, default: true }
+    }, { timestamps: true });
+
+    const adminUserSchema = new mongoose.Schema({
+      name: String,
+      email: { type: String, unique: true },
+      password: String,
+      role: { type: String, default: 'Admin' },
+      mobile: String
     }, { timestamps: true });
 
     const abandonedSchema = new mongoose.Schema({
@@ -82,6 +91,7 @@ try {
     }, { timestamps: true });
 
     User = mongoose.models.User || mongoose.model('User', userSchema);
+    AdminUser = mongoose.models.AdminUser || mongoose.model('AdminUser', adminUserSchema);
     AbandonedCart = mongoose.models.AbandonedCart || mongoose.model('AbandonedCart', abandonedSchema);
     WishlistRecord = mongoose.models.WishlistRecord || mongoose.model('WishlistRecord', wishlistSchema);
   }
