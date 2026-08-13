@@ -9,12 +9,13 @@ router.post('/google', async (req, res) => {
   const { name, email, googleId, avatar } = req.body;
 
   try {
-    let user = await User.findOne({ email: email ? email.toLowerCase().trim() : '' });
+    const cleanEmail = email ? email.toLowerCase().trim() : '';
+    let user = await User.findOne({ email: cleanEmail });
 
     if (!user) {
       user = new User({
         name,
-        email: email ? email.toLowerCase().trim() : '',
+        email: cleanEmail,
         googleId,
         avatar,
         password: 'google_authenticated_user',
@@ -80,7 +81,8 @@ router.post('/signup', async (req, res) => {
 router.post('/verify-otp', async (req, res) => {
   try {
     const { email } = req.body;
-    const user = await User.findOne({ email: email ? email.toLowerCase().trim() : '' });
+    const cleanEmail = email ? email.toLowerCase().trim() : '';
+    const user = await User.findOne({ email: cleanEmail });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -120,12 +122,15 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// 🟢 5. FETCH ALL CUSTOMERS ROUTE (FIXES ADMIN 404 NOT FOUND IN SYNC CUSTOMERS)
+// 🟢 5. FETCH ALL CUSTOMERS ROUTE FOR ADMIN (MATCHED PLAIN OBJECT RETURN)
 router.get('/customers', async (req, res) => {
   try {
-    const customers = await User.find({}, 'name email mobile address pincode cart wishlist createdAt').sort({ createdAt: -1 });
+    // .lean() returns pure JSON objects so Admin Frontend can read Array length without BSON errors
+    const customers = await User.find({}).sort({ createdAt: -1 }).lean();
+    console.log(`📡 Fetching ${customers.length} customers for Admin Intelligence.`);
     res.status(200).json(customers);
   } catch (error) {
+    console.error('Fetch Customers Error:', error);
     res.status(500).json({ message: 'Failed to fetch customers: ' + error.message });
   }
 });
@@ -146,11 +151,11 @@ router.put('/profile', async (req, res) => {
     if (mobile !== undefined) updateFields.mobile = mobile;
     if (address !== undefined) updateFields.address = address;
     if (pincode !== undefined) updateFields.pincode = pincode;
-    if (cart !== undefined) updateFields.cart = cart;         // 🛒 Syncs Cart in MongoDB
-    if (wishlist !== undefined) updateFields.wishlist = wishlist; // ❤️ Syncs Wishlist in MongoDB
+    if (cart !== undefined && Array.isArray(cart)) updateFields.cart = cart;         // 🛒 Syncs Cart Array
+    if (wishlist !== undefined && Array.isArray(wishlist)) updateFields.wishlist = wishlist; // ❤️ Syncs Wishlist Array
 
     let user = await User.findOneAndUpdate(
-      { email: cleanEmail },
+      { email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } }, // Case-insensitive exact match
       { $set: updateFields },
       { new: true, runValidators: false }
     );
@@ -170,7 +175,7 @@ router.put('/profile', async (req, res) => {
       await user.save();
     }
 
-    console.log(`✏️ Profile/Cart/Wishlist Updated in MongoDB for: ${cleanEmail}`);
+    console.log(`✏️ Profile/Cart/Wishlist Updated in MongoDB for: ${cleanEmail}. Cart items: ${user.cart ? user.cart.length : 0}, Wishlist items: ${user.wishlist ? user.wishlist.length : 0}`);
 
     res.status(200).json({
       message: 'Profile updated successfully in MongoDB!',
@@ -192,7 +197,7 @@ router.delete('/profile', async (req, res) => {
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    await User.findOneAndDelete({ email: cleanEmail });
+    await User.findOneAndDelete({ email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } });
 
     console.log(`🗑️ Account Permanently Deleted from MongoDB: ${cleanEmail}`);
 
