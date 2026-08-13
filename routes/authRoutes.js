@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+// 🟢 IMPORT ALL 3 SEPARATE MODELS FROM User.js
+const { User, AbandonedCart, WishlistRecord } = require('../models/User');
 
 // 1. Google Auth Route
 router.post('/google', async (req, res) => {
@@ -22,9 +23,7 @@ router.post('/google', async (req, res) => {
         isVerified: true,
         mobile: '',
         address: '',
-        pincode: '',
-        cart: [],
-        wishlist: []
+        pincode: ''
       });
       await user.save();
     }
@@ -56,9 +55,7 @@ router.post('/signup', async (req, res) => {
       mobile: mobile || '',
       address: address || '',
       pincode: pincode || '',
-      isVerified: true,
-      cart: [],
-      wishlist: []
+      isVerified: true
     });
     
     await user.save();
@@ -122,12 +119,24 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// 🟢 5. FETCH ALL CUSTOMERS ROUTE FOR ADMIN (MATCHED PLAIN OBJECT RETURN)
+// 🟢 5. FETCH ALL CUSTOMERS ROUTE FOR ADMIN (COMBINES USERS WITH SEPARATE CART & WISHLIST TABLES)
 router.get('/customers', async (req, res) => {
   try {
-    // .lean() returns pure JSON objects so Admin Frontend can read Array length without BSON errors
-    const customers = await User.find({}).sort({ createdAt: -1 }).lean();
-    console.log(`📡 Fetching ${customers.length} customers for Admin Intelligence.`);
+    const users = await User.find({}).sort({ createdAt: -1 }).lean();
+    
+    // Attach separate cart and wishlist collection records to each user object for seamless Admin viewing
+    const customers = await Promise.all(users.map(async (u) => {
+      const cartRecord = await AbandonedCart.findOne({ userEmail: u.email }).lean();
+      const wishlistRecord = await WishlistRecord.findOne({ userEmail: u.email }).lean();
+
+      return {
+        ...u,
+        cart: cartRecord ? cartRecord.cartItems : [],
+        wishlist: wishlistRecord ? wishlistRecord.wishlistItems : []
+      };
+    }));
+
+    console.log(`📡 Fetching ${customers.length} customers with separate table sync for Admin Intelligence.`);
     res.status(200).json(customers);
   } catch (error) {
     console.error('Fetch Customers Error:', error);
@@ -135,7 +144,7 @@ router.get('/customers', async (req, res) => {
   }
 });
 
-// 🟢 6. UPDATE PROFILE + CART & WISHLIST TRACKING ROUTE (PUT /api/auth/profile)
+// 🟢 6. UPDATE PROFILE + SYNC CART & WISHLIST TO SEPARATE MONGODB COLLECTIONS
 router.put('/profile', async (req, res) => {
   try {
     const { email, name, mobile, address, pincode, cart, wishlist } = req.body;
@@ -146,16 +155,15 @@ router.put('/profile', async (req, res) => {
 
     const cleanEmail = email.toLowerCase().trim();
 
+    // Update main User profile info
     const updateFields = {};
     if (name !== undefined) updateFields.name = name;
     if (mobile !== undefined) updateFields.mobile = mobile;
     if (address !== undefined) updateFields.address = address;
     if (pincode !== undefined) updateFields.pincode = pincode;
-    if (cart !== undefined && Array.isArray(cart)) updateFields.cart = cart;         // 🛒 Syncs Cart Array
-    if (wishlist !== undefined && Array.isArray(wishlist)) updateFields.wishlist = wishlist; // ❤️ Syncs Wishlist Array
 
     let user = await User.findOneAndUpdate(
-      { email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } }, // Case-insensitive exact match
+      { email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } },
       { $set: updateFields },
       { new: true, runValidators: false }
     );
@@ -168,18 +176,56 @@ router.put('/profile', async (req, res) => {
         mobile: mobile || '',
         address: address || '',
         pincode: pincode || '',
-        isVerified: true,
-        cart: cart || [],
-        wishlist: wishlist || []
+        isVerified: true
       });
       await user.save();
     }
 
-    console.log(`✏️ Profile/Cart/Wishlist Updated in MongoDB for: ${cleanEmail}. Cart items: ${user.cart ? user.cart.length : 0}, Wishlist items: ${user.wishlist ? user.wishlist.length : 0}`);
+    // 🟢 SYNC CART TO SEPARATE AbandonedCart COLLECTION
+    if (cart !== undefined && Array.isArray(cart)) {
+      await AbandonedCart.findOneAndUpdate(
+        { userEmail: cleanEmail },
+        { 
+          $set: { 
+            userName: user.name, 
+            mobile: user.mobile || mobile || '', 
+            cartItems: cart 
+          } 
+        },
+        { upsert: true, new: true }
+      );
+    }
+
+    // 🟢 SYNC WISHLIST TO SEPARATE WishlistRecord COLLECTION
+    if (wishlist !== undefined && Array.isArray(wishlist)) {
+      await WishlistRecord.findOneAndUpdate(
+        { userEmail: cleanEmail },
+        { 
+          $set: { 
+            userName: user.name, 
+            mobile: user.mobile || mobile || '', 
+            wishlistItems: wishlist 
+          } 
+        },
+        { upsert: true, new: true }
+      );
+    }
+
+    // Fetch final merged user object to return
+    const finalCart = await AbandonedCart.findOne({ userEmail: cleanEmail }).lean();
+    const finalWishlist = await WishlistRecord.findOne({ userEmail: cleanEmail }).lean();
+
+    const mergedUserResponse = {
+      ...user.toObject(),
+      cart: finalCart ? finalCart.cartItems : [],
+      wishlist: finalWishlist ? finalWishlist.wishlistItems : []
+    };
+
+    console.log(`✏️ Profile & Separate Collections Updated for: ${cleanEmail}. Cart items: ${mergedUserResponse.cart.length}, Wishlist items: ${mergedUserResponse.wishlist.length}`);
 
     res.status(200).json({
-      message: 'Profile updated successfully in MongoDB!',
-      user
+      message: 'Profile and separate tracking records updated successfully in MongoDB!',
+      user: mergedUserResponse
     });
   } catch (error) {
     console.error('Update Profile Error:', error);
@@ -187,7 +233,7 @@ router.put('/profile', async (req, res) => {
   }
 });
 
-// 🟢 7. INSTANT DELETE USER ACCOUNT ROUTE (DELETE /api/auth/profile)
+// 🟢 7. INSTANT DELETE USER ACCOUNT & SEPARATE RECORDS
 router.delete('/profile', async (req, res) => {
   try {
     const { email } = req.body;
@@ -198,10 +244,12 @@ router.delete('/profile', async (req, res) => {
 
     const cleanEmail = email.toLowerCase().trim();
     await User.findOneAndDelete({ email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } });
+    await AbandonedCart.findOneAndDelete({ userEmail: cleanEmail });
+    await WishlistRecord.findOneAndDelete({ userEmail: cleanEmail });
 
-    console.log(`🗑️ Account Permanently Deleted from MongoDB: ${cleanEmail}`);
+    console.log(`🗑️ Account & Separate Tracking Records Deleted from MongoDB: ${cleanEmail}`);
 
-    res.status(200).json({ message: 'Account permanently deleted from database.' });
+    res.status(200).json({ message: 'Account and tracking data permanently deleted from database.' });
   } catch (error) {
     console.error('Delete Account Error:', error);
     res.status(500).json({ message: 'Failed to delete account', error: error.message });
