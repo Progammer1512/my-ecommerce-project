@@ -29,11 +29,19 @@ try { Review = require('./models/reviewModel'); } catch (e) {
   Review = mongoose.models.Review || mongoose.model('Review', schema);
 }
 try { Coupon = require('./models/couponModel'); } catch (e) {
-  const schema = new mongoose.Schema({ code: String, discount: Number, category: String, maxUsage: Number, usedCount: Number, status: String }, { timestamps: true });
+  const schema = new mongoose.Schema({ 
+    code: { type: String, required: true, unique: true }, 
+    discount: Number, 
+    category: String, 
+    maxUsage: Number, 
+    usedCount: { type: Number, default: 0 }, 
+    status: String,
+    targetUserEmail: { type: String, default: '' } // 🟢 Targeted Discount Field
+  }, { timestamps: true });
   Coupon = mongoose.models.Coupon || mongoose.model('Coupon', schema);
 }
 
-// 🟢 DYNAMIC USER MODEL FALLBACK
+// DYNAMIC USER MODEL FALLBACK WITH CART & WISHLIST TRACKING
 try { User = require('./models/userModel'); } catch (e) {
   try { User = require('./models/User'); } catch (err) {
     const userSchema = new mongoose.Schema({
@@ -44,7 +52,9 @@ try { User = require('./models/userModel'); } catch (e) {
       address: String,
       pincode: String,
       googleId: String,
-      avatar: String
+      avatar: String,
+      cart: { type: Array, default: [] },      // 🟢 Cart Tracking Array
+      wishlist: { type: Array, default: [] }   // 🟢 Wishlist Tracking Array
     }, { timestamps: true });
     User = mongoose.models.User || mongoose.model('User', userSchema);
   }
@@ -78,7 +88,7 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
   }
 });
 
-// 🟢 2. DIRECT PROFILE UPDATE & DELETE ENDPOINTS (FIXES MONGODB PROFILE UPDATE/DELETE ERROR)
+// 🟢 2. DIRECT PROFILE UPDATE & DELETE ENDPOINTS
 app.put('/api/auth/profile', async (req, res) => {
   try {
     const { email, name, mobile, address, pincode } = req.body;
@@ -93,7 +103,6 @@ app.put('/api/auth/profile', async (req, res) => {
     );
 
     if (!updatedUser) {
-      // If user profile record not created via traditional signup, create/upsert it
       updatedUser = new User({
         email: email.toLowerCase().trim(),
         name,
@@ -135,7 +144,17 @@ app.delete('/api/auth/profile', async (req, res) => {
   }
 });
 
-// 3. Direct Banner Endpoints
+// 🟢 3. FETCH ALL CUSTOMERS LIST FOR ADMIN CUSTOMER INTELLIGENCE TAB
+app.get('/api/auth/customers', async (req, res) => {
+  try {
+    const customers = await User.find({}, 'name email mobile address pincode cart wishlist createdAt').sort({ createdAt: -1 });
+    return res.status(200).json(customers);
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to fetch customers: ' + error.message });
+  }
+});
+
+// 4. Direct Banner Endpoints
 app.get('/api/banners', async (req, res) => {
   try {
     const banners = await Banner.find({}).sort({ createdAt: -1 });
@@ -178,7 +197,7 @@ app.delete('/api/banners/:id', async (req, res) => {
   }
 });
 
-// 4. Direct Reviews Endpoints
+// 5. Direct Reviews Endpoints
 app.get('/api/reviews', async (req, res) => {
   try {
     const reviews = await Review.find({}).sort({ createdAt: -1 });
@@ -208,10 +227,25 @@ app.post('/api/reviews', async (req, res) => {
   }
 });
 
-// 5. Direct Coupons Endpoints
+// 🟢 6. DIRECT COUPONS ENDPOINTS WITH TARGETED CUSTOMER EMAIL FILTERING
 app.get('/api/coupons', async (req, res) => {
   try {
-    const coupons = await Coupon.find({}).sort({ createdAt: -1 });
+    const { email } = req.query;
+    let query = {};
+
+    // If customer email is passed, show Global Coupons + Coupons specifically targeted to this customer
+    if (email) {
+      const cleanEmail = email.toLowerCase().trim();
+      query = {
+        $or: [
+          { targetUserEmail: { $exists: false } },
+          { targetUserEmail: '' },
+          { targetUserEmail: cleanEmail }
+        ]
+      };
+    }
+
+    const coupons = await Coupon.find(query).sort({ createdAt: -1 });
     return res.status(200).json(coupons);
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch coupons' });
@@ -220,7 +254,7 @@ app.get('/api/coupons', async (req, res) => {
 
 app.post('/api/coupons', async (req, res) => {
   try {
-    const { code, discount, category, maxUsage } = req.body;
+    const { code, discount, category, maxUsage, targetUserEmail } = req.body;
     if (!code || discount === undefined) {
       return res.status(400).json({ message: 'Coupon code and discount are required' });
     }
@@ -236,7 +270,8 @@ app.post('/api/coupons', async (req, res) => {
       category: category || 'All',
       maxUsage: Number(maxUsage) || 50,
       usedCount: 0,
-      status: 'Active'
+      status: 'Active',
+      targetUserEmail: targetUserEmail ? targetUserEmail.toLowerCase().trim() : '' // 🎯 Target Specific Email
     });
 
     await newCoupon.save();
@@ -264,7 +299,7 @@ app.post('/api/coupons/use', async (req, res) => {
   }
 });
 
-// 6. DIRECT MASTER CLEAR ROUTE
+// 7. DIRECT MASTER CLEAR ROUTE
 app.get('/api/orders/all/clear', async (req, res) => {
   try {
     if (mongoose.connection.db) {
