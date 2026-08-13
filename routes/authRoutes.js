@@ -21,7 +21,9 @@ router.post('/google', async (req, res) => {
         isVerified: true,
         mobile: '',
         address: '',
-        pincode: ''
+        pincode: '',
+        cart: [],
+        wishlist: []
       });
       await user.save();
     }
@@ -32,11 +34,10 @@ router.post('/google', async (req, res) => {
   }
 });
 
-// 2. EMAIL SIGN UP ROUTE (Direct Signup - Testing Mode, No Email/OTP Required)
+// 2. EMAIL SIGN UP ROUTE
 router.post('/signup', async (req, res) => {
   try {
     const { name, email, password, mobile, address, pincode } = req.body;
-
     const cleanEmail = email ? email.toLowerCase().trim() : '';
 
     let user = await User.findOne({ email: cleanEmail });
@@ -54,7 +55,9 @@ router.post('/signup', async (req, res) => {
       mobile: mobile || '',
       address: address || '',
       pincode: pincode || '',
-      isVerified: true // Direct verified maan liya hai taaki OTP ki zarurat na pade
+      isVerified: true,
+      cart: [],
+      wishlist: []
     });
     
     await user.save();
@@ -73,7 +76,7 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// 3. VERIFY OTP ROUTE (Optional fallback)
+// 3. VERIFY OTP ROUTE
 router.post('/verify-otp', async (req, res) => {
   try {
     const { email } = req.body;
@@ -87,7 +90,7 @@ router.post('/verify-otp', async (req, res) => {
   }
 });
 
-// 4. LOGIN ROUTE (Bina OTP ke seedha Email aur Password se Direct Login)
+// 4. LOGIN ROUTE
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -117,10 +120,20 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// 🟢 5. UPDATE USER PROFILE ROUTE (PUT /api/auth/profile)
+// 🟢 5. FETCH ALL CUSTOMERS ROUTE (FIXES ADMIN 404 NOT FOUND IN SYNC CUSTOMERS)
+router.get('/customers', async (req, res) => {
+  try {
+    const customers = await User.find({}, 'name email mobile address pincode cart wishlist createdAt').sort({ createdAt: -1 });
+    res.status(200).json(customers);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch customers: ' + error.message });
+  }
+});
+
+// 🟢 6. UPDATE PROFILE + CART & WISHLIST TRACKING ROUTE (PUT /api/auth/profile)
 router.put('/profile', async (req, res) => {
   try {
-    const { email, name, mobile, address, pincode } = req.body;
+    const { email, name, mobile, address, pincode, cart, wishlist } = req.body;
 
     if (!email) {
       return res.status(400).json({ message: 'Email ID is required to update profile' });
@@ -128,21 +141,21 @@ router.put('/profile', async (req, res) => {
 
     const cleanEmail = email.toLowerCase().trim();
 
+    const updateFields = {};
+    if (name !== undefined) updateFields.name = name;
+    if (mobile !== undefined) updateFields.mobile = mobile;
+    if (address !== undefined) updateFields.address = address;
+    if (pincode !== undefined) updateFields.pincode = pincode;
+    if (cart !== undefined) updateFields.cart = cart;         // 🛒 Syncs Cart in MongoDB
+    if (wishlist !== undefined) updateFields.wishlist = wishlist; // ❤️ Syncs Wishlist in MongoDB
+
     let user = await User.findOneAndUpdate(
       { email: cleanEmail },
-      { 
-        $set: { 
-          name: name || '', 
-          mobile: mobile || '', 
-          address: address || '', 
-          pincode: pincode || '' 
-        } 
-      },
+      { $set: updateFields },
       { new: true, runValidators: false }
     );
 
     if (!user) {
-      // If user profile record not created via signup, upsert it
       user = new User({
         email: cleanEmail,
         name: name || 'Verified Customer',
@@ -150,22 +163,18 @@ router.put('/profile', async (req, res) => {
         mobile: mobile || '',
         address: address || '',
         pincode: pincode || '',
-        isVerified: true
+        isVerified: true,
+        cart: cart || [],
+        wishlist: wishlist || []
       });
       await user.save();
     }
 
-    console.log(`✏️ Profile Updated in MongoDB for: ${cleanEmail}`);
+    console.log(`✏️ Profile/Cart/Wishlist Updated in MongoDB for: ${cleanEmail}`);
 
     res.status(200).json({
       message: 'Profile updated successfully in MongoDB!',
-      user: {
-        name: user.name,
-        email: user.email,
-        mobile: user.mobile,
-        address: user.address,
-        pincode: user.pincode
-      }
+      user
     });
   } catch (error) {
     console.error('Update Profile Error:', error);
@@ -173,7 +182,7 @@ router.put('/profile', async (req, res) => {
   }
 });
 
-// 🟢 6. INSTANT DELETE USER ACCOUNT ROUTE (DELETE /api/auth/profile)
+// 🟢 7. INSTANT DELETE USER ACCOUNT ROUTE (DELETE /api/auth/profile)
 router.delete('/profile', async (req, res) => {
   try {
     const { email } = req.body;
