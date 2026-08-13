@@ -21,6 +21,7 @@ router.post('/google', async (req, res) => {
         avatar,
         password: 'google_authenticated_user',
         isVerified: true,
+        isAdmin: false,
         mobile: '',
         address: '',
         pincode: ''
@@ -55,7 +56,8 @@ router.post('/signup', async (req, res) => {
       mobile: mobile || '',
       address: address || '',
       pincode: pincode || '',
-      isVerified: true
+      isVerified: true,
+      isAdmin: false
     });
     
     await user.save();
@@ -119,10 +121,14 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// 🟢 5. FETCH ALL CUSTOMERS ROUTE FOR ADMIN (COMBINES USERS WITH SEPARATE CART & WISHLIST TABLES)
+// 🟢 5. FETCH ALL CUSTOMERS ROUTE FOR ADMIN (COMBINES USERS & EXCLUDES ADMIN/STAFF ACCOUNTS)
 router.get('/customers', async (req, res) => {
   try {
-    const users = await User.find({}).sort({ createdAt: -1 }).lean();
+    // Exclude admins and internal store management emails from the customer list
+    const users = await User.find({
+      isAdmin: { $ne: true },
+      email: { $not: /(admin|inventory|staff)/i }
+    }).sort({ createdAt: -1 }).lean();
     
     // Attach separate cart and wishlist collection records to each user object for seamless Admin viewing
     const customers = await Promise.all(users.map(async (u) => {
@@ -136,7 +142,7 @@ router.get('/customers', async (req, res) => {
       };
     }));
 
-    console.log(`📡 Fetching ${customers.length} customers with separate table sync for Admin Intelligence.`);
+    console.log(`📡 Fetching ${customers.length} verified customers (Admins excluded) for Admin Intelligence.`);
     res.status(200).json(customers);
   } catch (error) {
     console.error('Fetch Customers Error:', error);
@@ -176,7 +182,8 @@ router.put('/profile', async (req, res) => {
         mobile: mobile || '',
         address: address || '',
         pincode: pincode || '',
-        isVerified: true
+        isVerified: true,
+        isAdmin: false
       });
       await user.save();
     }
