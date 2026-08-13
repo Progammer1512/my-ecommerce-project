@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-// 🟢 IMPORT ALL 3 SEPARATE MODELS FROM User.js
-const { User, AbandonedCart, WishlistRecord } = require('../models/User');
+// 🟢 IMPORT ALL MODELS INCLUDING AdminUser FROM User.js
+const { User, AdminUser, AbandonedCart, WishlistRecord } = require('../models/User');
 
 // 1. Google Auth Route
 router.post('/google', async (req, res) => {
@@ -21,7 +21,6 @@ router.post('/google', async (req, res) => {
         avatar,
         password: 'google_authenticated_user',
         isVerified: true,
-        isAdmin: false,
         mobile: '',
         address: '',
         pincode: ''
@@ -35,7 +34,7 @@ router.post('/google', async (req, res) => {
   }
 });
 
-// 2. EMAIL SIGN UP ROUTE
+// 2. EMAIL SIGN UP ROUTE (For Customers)
 router.post('/signup', async (req, res) => {
   try {
     const { name, email, password, mobile, address, pincode } = req.body;
@@ -56,8 +55,7 @@ router.post('/signup', async (req, res) => {
       mobile: mobile || '',
       address: address || '',
       pincode: pincode || '',
-      isVerified: true,
-      isAdmin: false
+      isVerified: true
     });
     
     await user.save();
@@ -121,16 +119,11 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// 🟢 5. FETCH ALL CUSTOMERS ROUTE FOR ADMIN (COMBINES USERS & EXCLUDES ADMIN/STAFF ACCOUNTS)
+// 🟢 5. FETCH ALL CUSTOMERS ROUTE FOR ADMIN (ONLY PURE CUSTOMERS, NO ADMINS/STAFF)
 router.get('/customers', async (req, res) => {
   try {
-    // Exclude admins and internal store management emails from the customer list
-    const users = await User.find({
-      isAdmin: { $ne: true },
-      email: { $not: /(admin|inventory|staff)/i }
-    }).sort({ createdAt: -1 }).lean();
+    const users = await User.find({}).sort({ createdAt: -1 }).lean();
     
-    // Attach separate cart and wishlist collection records to each user object for seamless Admin viewing
     const customers = await Promise.all(users.map(async (u) => {
       const cartRecord = await AbandonedCart.findOne({ userEmail: u.email }).lean();
       const wishlistRecord = await WishlistRecord.findOne({ userEmail: u.email }).lean();
@@ -142,13 +135,94 @@ router.get('/customers', async (req, res) => {
       };
     }));
 
-    console.log(`📡 Fetching ${customers.length} verified customers (Admins excluded) for Admin Intelligence.`);
+    console.log(`📡 Fetching ${customers.length} pure customers for Admin Intelligence.`);
     res.status(200).json(customers);
   } catch (error) {
     console.error('Fetch Customers Error:', error);
     res.status(500).json({ message: 'Failed to fetch customers: ' + error.message });
   }
 });
+
+// ==========================================
+// 🟢 NEW ADMIN & STAFF USERS MANAGEMENT ENDPOINTS
+// ==========================================
+
+// A. Get All Admin/Staff Users
+router.get('/admin-users', async (req, res) => {
+  try {
+    const admins = await AdminUser.find({}).sort({ createdAt: -1 }).lean();
+    res.status(200).json(admins);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch admin users: ' + error.message });
+  }
+});
+
+// B. Create New Admin/Staff User
+router.post('/admin-users', async (req, res) => {
+  try {
+    const { name, email, password, role, mobile } = req.body;
+    if (!email || !password || !name) {
+      return res.status(400).json({ message: 'Name, email and password are required' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const existingAdmin = await AdminUser.findOne({ email: cleanEmail });
+    if (existingAdmin) {
+      return res.status(400).json({ message: 'Admin user already exists with this email!' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const newAdmin = new AdminUser({
+      name,
+      email: cleanEmail,
+      password: hashedPassword,
+      role: role || 'Admin',
+      mobile: mobile || ''
+    });
+
+    await newAdmin.save();
+    const updatedAdmins = await AdminUser.find({}).sort({ createdAt: -1 });
+    res.status(201).json({ message: 'Admin user created successfully!', admins: updatedAdmins });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to create admin user: ' + error.message });
+  }
+});
+
+// C. Update Admin/Staff User
+router.put('/admin-users/:id', async (req, res) => {
+  try {
+    const { name, email, role, mobile, password } = req.body;
+    const updateData = { name, email: email ? email.toLowerCase().trim() : undefined, role, mobile };
+
+    if (password && password.trim() !== '') {
+      const salt = await bcrypt.genSalt(10);
+      updateData.password = await bcrypt.hash(password, salt);
+    }
+
+    Object.keys(updateData).forEach(key => updateData[key] === undefined && delete updateData[key]);
+
+    const updated = await AdminUser.findByIdAndUpdate(req.params.id, { $set: updateData }, { new: true });
+    const allAdmins = await AdminUser.find({}).sort({ createdAt: -1 });
+    res.status(200).json({ message: 'Admin updated successfully!', admins: allAdmins });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to update admin: ' + error.message });
+  }
+});
+
+// D. Delete Admin/Staff User
+router.delete('/admin-users/:id', async (req, res) => {
+  try {
+    await AdminUser.findByIdAndDelete(req.params.id);
+    const remainingAdmins = await AdminUser.find({}).sort({ createdAt: -1 });
+    res.status(200).json({ message: 'Admin user deleted successfully!', admins: remainingAdmins });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to delete admin user: ' + error.message });
+  }
+});
+
+// ==========================================
 
 // 🟢 6. UPDATE PROFILE + SYNC CART & WISHLIST TO SEPARATE MONGODB COLLECTIONS
 router.put('/profile', async (req, res) => {
@@ -182,8 +256,7 @@ router.put('/profile', async (req, res) => {
         mobile: mobile || '',
         address: address || '',
         pincode: pincode || '',
-        isVerified: true,
-        isAdmin: false
+        isVerified: true
       });
       await user.save();
     }
