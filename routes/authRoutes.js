@@ -119,10 +119,13 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// 🟢 5. FETCH ALL CUSTOMERS ROUTE FOR ADMIN (ONLY PURE CUSTOMERS, NO ADMINS/STAFF)
+// 🟢 5. FETCH ALL CUSTOMERS ROUTE FOR ADMIN (STRICTLY PURE CUSTOMERS, ZERO ADMIN/STAFF EMAILS)
 router.get('/customers', async (req, res) => {
   try {
-    const users = await User.find({}).sort({ createdAt: -1 }).lean();
+    // Exclude any user whose email contains admin, inventory, or staff keywords
+    const users = await User.find({
+      email: { $not: /(admin|inventory|staff)/i }
+    }).sort({ createdAt: -1 }).lean();
     
     const customers = await Promise.all(users.map(async (u) => {
       const cartRecord = await AbandonedCart.findOne({ userEmail: u.email }).lean();
@@ -135,7 +138,7 @@ router.get('/customers', async (req, res) => {
       };
     }));
 
-    console.log(`📡 Fetching ${customers.length} pure customers for Admin Intelligence.`);
+    console.log(`📡 Fetching ${customers.length} pure store customers (Admins completely filtered out).`);
     res.status(200).json(customers);
   } catch (error) {
     console.error('Fetch Customers Error:', error);
@@ -144,7 +147,7 @@ router.get('/customers', async (req, res) => {
 });
 
 // ==========================================
-// 🟢 NEW ADMIN & STAFF USERS MANAGEMENT ENDPOINTS
+// 🟢 ADMIN & STAFF USERS MANAGEMENT ENDPOINTS
 // ==========================================
 
 // A. Get All Admin/Staff Users
@@ -203,7 +206,7 @@ router.put('/admin-users/:id', async (req, res) => {
 
     Object.keys(updateData).forEach(key => updateData[key] === undefined && delete updateData[key]);
 
-    const updated = await AdminUser.findByIdAndUpdate(req.params.id, { $set: updateData }, { new: true });
+    await AdminUser.findByIdAndUpdate(req.params.id, { $set: updateData }, { new: true });
     const allAdmins = await AdminUser.find({}).sort({ createdAt: -1 });
     res.status(200).json({ message: 'Admin updated successfully!', admins: allAdmins });
   } catch (error) {
