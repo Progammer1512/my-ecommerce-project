@@ -12,11 +12,11 @@ try {
   console.log('⚠️ Helmet package missing, proceeding without helmet middleware');
 }
 
-// Existing Routes Imports
-let authRoutes, productRoutes, orderRoutes;
-try { authRoutes = require('./routes/authRoutes'); } catch (e) {}
-try { productRoutes = require('./routes/productRoutes'); } catch (e) {}
-try { orderRoutes = require('./routes/orderRoutes'); } catch (e) {}
+// 🟢 STRICT ROUTE IMPORTS (Ensures Routes Never Get Skipped Or Silent Fail)
+const authRoutes = require('./routes/authRoutes');
+let productRoutes, orderRoutes;
+try { productRoutes = require('./routes/productRoutes'); } catch (e) { console.log('Product routes error:', e.message); }
+try { orderRoutes = require('./routes/orderRoutes'); } catch (e) { console.log('Order routes error:', e.message); }
 
 // Models Imports with Dynamic Fallbacks
 let Banner, Review, Coupon, User, AdminUser, AbandonedCart, WishlistRecord;
@@ -382,14 +382,14 @@ app.get('/api/orders/all/clear', async (req, res) => {
   }
 });
 
-// Mounted API Routes
-if (authRoutes) app.use('/api/auth', authRoutes);
+// 🟢 MOUNTED API ROUTES (Always Active)
+app.use('/api/auth', authRoutes);
 if (productRoutes) app.use('/api/products', productRoutes);
 if (orderRoutes) app.use('/api/orders', orderRoutes);
 
 // Root Healthcheck Route
 app.get('/', (req, res) => {
-  res.send('Aapka E-Commerce Backend Server Successfully Chalu Ho Gaya Hai!');
+  res.send('🚀 TechStore Backend Server is Active & Healthy!');
 });
 
 // Server Connection Setup
