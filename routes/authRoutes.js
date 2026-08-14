@@ -5,20 +5,24 @@ const jwt = require('jsonwebtoken');
 // 🟢 IMPORT ALL MODELS INCLUDING AdminUser FROM User.js
 const { User, AdminUser, AbandonedCart, WishlistRecord } = require('../models/User');
 
-// 1. Google Auth Route
+// 1. Google Auth Route (UPDATED WITH JWT TOKEN GENERATION)
 router.post('/google', async (req, res) => {
   const { name, email, googleId, avatar } = req.body;
 
   try {
-    const cleanEmail = email ? email.toLowerCase().trim() : '';
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required for Google Sign-In' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
     let user = await User.findOne({ email: cleanEmail });
 
     if (!user) {
       user = new User({
-        name,
+        name: name || 'Google User',
         email: cleanEmail,
         googleId,
-        avatar,
+        avatar: avatar || '',
         password: 'google_authenticated_user',
         isVerified: true,
         mobile: '',
@@ -26,11 +30,34 @@ router.post('/google', async (req, res) => {
         pincode: ''
       });
       await user.save();
+      console.log(`✅ New User Created via Google Auth: ${cleanEmail}`);
+    } else {
+      // If user exists but googleId wasn't linked, link it
+      if (!user.googleId && googleId) {
+        user.googleId = googleId;
+      }
+      if (avatar && !user.avatar) {
+        user.avatar = avatar;
+      }
+      await user.save();
+      console.log(`🔓 User Logged In via Google Auth: ${cleanEmail}`);
     }
 
-    res.json({ message: 'Google Auth Successful', user });
+    // 🟢 GENERATE JWT TOKEN (Fixes Frontend JWT Decode & Auth Error)
+    const token = jwt.sign(
+      { id: user._id, email: user.email },
+      process.env.JWT_SECRET || 'secret_key',
+      { expiresIn: '30d' }
+    );
+
+    res.status(200).json({
+      message: 'Google Auth Successful',
+      token,
+      user
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Google Auth Error:', error);
+    res.status(500).json({ message: 'Google authentication failed', error: error.message });
   }
 });
 
